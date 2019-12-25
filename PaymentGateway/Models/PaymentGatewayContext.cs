@@ -12,7 +12,6 @@ namespace PaymentGatewayAPI.Models
         { 
         }
 
-        public DbSet<PaymentGateway> PaymentGatewayItems { get; set; }
         public DbSet<Bank> Bank { get; set; }
         public DbSet<Cards> Cards { get; set; }
         public DbSet<Merchant> Merchant { get; set; }

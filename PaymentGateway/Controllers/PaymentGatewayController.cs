@@ -10,6 +10,8 @@ using Newtonsoft.Json.Linq;
 using PaymentGatewayAPI.Models;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using System.Globalization;
 
 namespace PaymentGatewayAPI.Controllers
 {
@@ -21,15 +23,9 @@ namespace PaymentGatewayAPI.Controllers
 
         public PaymentGatewayController(PaymentGatewayContext context) => _context = context;
 
-        //GET: api/paymentgateway
-        [HttpGet]
-        public ActionResult<IEnumerable<Orders>> GetPayment()
-        {
-            return _context.Orders;
-        }
-
         //GET: api/paymentgateway/n
         [HttpGet("{id}")]
+        [Produces("application/json")]
         public ActionResult<Orders> GetPayment(int id)
         {
             var message = new JObject();
@@ -55,9 +51,20 @@ namespace PaymentGatewayAPI.Controllers
             }
 
             if (cardNumber == null && expiryDate == null && type == null && cvv == null && billingAddress == null && status == null && executionDate == null)
-                return NotFound();
-            else {
+            {
+                array.Add("Status Code: 400 Bad Request");
+                array.Add("Error Message: The orderId supplied does not exist.");
+                return new ContentResult()
+                {
+                    StatusCode = 400,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
+            }
+            else
+            {
                 string decryptedCardNumber = Decrypt(cardNumber, "sblw-3hn8-sqoy19");
+                array.Add("Status Code: 200 Success OK");
                 array.Add("CardNumber: " + decryptedCardNumber.Substring(decryptedCardNumber.Length - 4).PadLeft(decryptedCardNumber.Length, '*'));
                 array.Add("ExpiryDate: " + expiryDate);
                 array.Add("Type: " + type);
@@ -65,19 +72,37 @@ namespace PaymentGatewayAPI.Controllers
                 array.Add("Billing Address: " + billingAddress);
                 array.Add("Transaction Status: " + status);
                 array.Add("Execution Date: " + executionDate);
-                return Content(message.ToString(), "application/json");
+                return new ContentResult()
+                {
+                    StatusCode = 200,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
             }
         }
 
         //POST: api/paymentgateway
         [HttpPost]
         [Produces("application/json")]
-        public ActionResult<Orders> PostPayment(Orders orders, int MerchantId)
+        public ActionResult<Orders> PostPayment(Orders orders)
         {
             var message = new JObject();
             JArray array = new JArray();
             message["Status Message"] = array;
 
+            if (!String.IsNullOrEmpty(validateMerchantId(orders.MerchantId)))
+            {
+                array.Add("Status Code: 400 Bad Request");
+                array.Add(validateMerchantId(orders.MerchantId));
+                array.Add("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss"));
+                return new ContentResult()
+                {
+                    StatusCode = 400,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
+            }
+            
             if (String.IsNullOrEmpty(validateRequestValues(orders))) {
                 orders.CardNumber.Trim();
                 orders.CVV.Trim();
@@ -88,8 +113,13 @@ namespace PaymentGatewayAPI.Controllers
             else {
                 array.Add("Status Code: 400 Bad Request");
                 array.Add(validateRequestValues(orders));
-                array.Add("Date: " + DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss"));
-                return Content(message.ToString(), "application/json");
+                array.Add("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss"));
+                return new ContentResult()
+                {
+                    StatusCode = 400,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
             }
 
             string processPaymentResponse = processPayment(orders);
@@ -97,33 +127,59 @@ namespace PaymentGatewayAPI.Controllers
             if (processPaymentResponse == "Success")
             {
                 array.Add("Status Code: 200 Success OK");
-                array.Add("Message: Payment has been accepted and processed.");
-                array.Add("Date: " + DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss"));
-                return Content(message.ToString(), "application/json");
+                array.Add("Response Message: Payment has been accepted and processed.");
+                array.Add("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss"));
+                return new ContentResult()
+                {
+                    StatusCode = 200,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
             }
             else {
                 array.Add("Status Code: 400 Bad Request");
                 array.Add(processPaymentResponse);
-                array.Add("Date: " + DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss"));
-                return Content(message.ToString(), "application/json");
+                array.Add("Date: " + DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss"));
+                return new ContentResult()
+                {
+                    StatusCode = 400,
+                    Content = message.ToString(),
+                    ContentType = "application/json"
+                };
             }
         }
 
         public string validateRequestValues(Orders orders) {
 
             string result = "";
+            DateTime Date;
 
             if (String.IsNullOrEmpty(orders.CardNumber) || String.IsNullOrEmpty(orders.ExpiryDate) || String.IsNullOrEmpty(orders.Amount.ToString()) || String.IsNullOrEmpty(orders.Currency) || String.IsNullOrEmpty(orders.Type) || String.IsNullOrEmpty(orders.CVV) || String.IsNullOrEmpty(orders.BankName) || String.IsNullOrEmpty(orders.BillingAddress))
-                result = "Error Message: Fields cannot be empty";
+                result = "Error Message: All fields are required";
 
             if (!orders.Amount.ToString().All(char.IsNumber) || !orders.CardNumber.All(char.IsNumber) || !orders.CVV.All(char.IsNumber))
-                result = "Error Message: The following fields should be a numeric value: Amount, CardNumber, CVV";
+                result = "Error Message: The fields 'Amount, CardNumber, CVV' should be a numeric value.";
 
-            if (orders.CardNumber.Length >= 17)
-                result = "Error Message: CardNumber should be only 16 digits";
+            if (orders.CardNumber.Length != 16)
+                result = "Error Message: The field 'CardNumber' should be only 16 digits.";
 
-            if (orders.CVV.Length >= 4)
-                result = "Error Message: CVV should be only 3 digits";
+            if (orders.CVV.Length != 3)
+                result = "Error Message: The field 'CVV' should be only 3 digits.";
+
+            if (!DateTime.TryParseExact(orders.ExpiryDate, "dd/yy", DateTimeFormatInfo.InvariantInfo, DateTimeStyles.None, out Date))
+                result = "Error Message: The field 'Expiry Date' should be in format dd/yy.";
+
+            return result;
+        }
+
+        public string validateMerchantId (int merchantId)
+        {
+            string result = "";
+
+            var queryResult = _context.Merchant.Where(a => a.MerchantId == merchantId).SingleOrDefault();
+
+            if (queryResult == null)
+                return result = "Error Message: The merchant identifier supplied in the 'MerchantId' field does not exist.";
 
             return result;
         }
@@ -135,7 +191,7 @@ namespace PaymentGatewayAPI.Controllers
             var bank = _context.Bank.Where(a => a.BankName == orders.BankName).SingleOrDefault();
 
             if (bank == null)
-                return bankResponse = "Error Message: The selected Bank does not exists.";
+                return bankResponse = "Error Message: The bank name supplied in the 'BankName' field does not exist.";
             else {
                 transactions = new Transactions { status = "Pending", OrdersId = orders.OrdersId, BankId = bank.BankId, ExecutionDate = DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss") };
                 _context.Transactions.Add(transactions);
@@ -146,12 +202,12 @@ namespace PaymentGatewayAPI.Controllers
 
             if (bankResponse == "Success") {
                 transactions.status = "Accepted";
-                transactions.ExecutionDate = DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss");
+                transactions.ExecutionDate = DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss");
                 _context.Transactions.Update(transactions);
                 _context.SaveChanges();
             } else {
                 transactions.status = "Declined";
-                transactions.ExecutionDate = DateTime.Today.ToString("dd-MM-yyyy HH:mm:ss");
+                transactions.ExecutionDate = DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss");
                 _context.Transactions.Update(transactions);
                 _context.SaveChanges();
             }
@@ -164,7 +220,7 @@ namespace PaymentGatewayAPI.Controllers
             var card = _context.Cards.Where(c => c.CardNumber == Decrypt(orders.CardNumber, "sblw-3hn8-sqoy19")).SingleOrDefault();
             string response = "";
             if(card == null)
-                return "Error Message: The card supplied is invalid.";
+                return "Error Message: The card supplied in the 'CardNumber' field does not exist.";
 
             var bankQuery = from cards in _context.Cards
                           join bank in _context.Bank on cards.BankId equals bank.BankId
@@ -184,7 +240,7 @@ namespace PaymentGatewayAPI.Controllers
                     }
                 }
                 else {
-                    response = "Error Message: The cards supplied is invalid.";
+                    response = "Error Message: The card supplied in the 'CardNumber' field does not exist.";
                     break;
                 }
             }
@@ -215,14 +271,5 @@ namespace PaymentGatewayAPI.Controllers
             tripleDES.Clear();
             return UTF8Encoding.UTF8.GetString(resultArray);
         }
-
-
-        /*
-        [HttpGet]
-        public ActionResult<IEnumerable<string>> GetString() 
-        {
-            return new string[] { "Test", "Payment", "Gateway"};
-        }
-        */
     }
 }

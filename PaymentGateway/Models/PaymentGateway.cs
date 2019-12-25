@@ -5,14 +5,6 @@ using System.Threading.Tasks;
 
 namespace PaymentGatewayAPI.Models
 {
-    public class PaymentGateway
-    {
-        public int Id {get; set;}
-        public string HowTo {get; set;}
-        public string Platform { get; set;}
-        public string PaymentGate { get; set; }
-    }
-
     public class Merchant
     {
         public int MerchantId { get; set; }
